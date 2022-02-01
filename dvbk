@@ -1,0 +1,75 @@
+#!/bin/bash
+
+# Usage: backup -<mode> -v <volume_name> -f <tar file>
+# modes: (b)ackup/(r)estore
+
+b_flag=''
+r_flag=''
+volume=''
+file=''
+
+ERROR_NO_MODE="ERROR: Mode needs to be specified, either (-b)ackup or (-r)estore"
+ERROR_TWO_MODES="ERROR: You can't specify both modes"
+ERROR_NO_VOLUME_SPECIFIED="ERROR: No volume has been specified"
+ERROR_NO_FILE_SPECIFIED="ERROR: No file has bee specified"
+ERROR_VOLUME_DOESNT_EXIST="ERROR: Specified volume doesn't exist"
+WARNING_VOLUME_ALREADY_EXISTS="WARNING! Volume already exists, OVERWRITING it may cause data loss";
+
+print_usage() {
+    if [ "$1" == "NO_MODE" ]; then printf "$ERROR_NO_MODE"; fi
+    if [ "$1" == "BOTH_MODES" ]; then printf "$ERROR_TWO_MODES"; fi
+    if [ "$1" == "NO_VOLUME_SPECIFIED" ]; then printf "$ERROR_NO_VOLUME_SPECIFIED"; fi
+    if [ "$1" == "NO_FILE_SPECIFIED" ]; then printf "$ERROR_NO_FILE_SPECIFIED"; fi
+    if [ "$1" == "VOLUME_DOESNT_EXIST" ]; then printf "$ERROR_VOLUME_DOESNT_EXIST"; fi
+    if [ "$1" != "" ]; then printf "\n"; fi
+    printf "Usage: backup -<mode> -v <volume_name> -f <tar file>\n"
+}
+
+while getopts 'brv:f:' flag; do
+    case "${flag}" in
+    b) b_flag='true' ;;
+    r) r_flag='true' ;;
+    v) volume="${OPTARG}" ;;
+    f) file="${OPTARG}" ;;
+    *) print_usage
+        exit 1 ;;
+    esac
+done
+
+# One of the two modes needs to be specified
+# And both can't be on
+if [ "$b_flag" == "" ] && [ "$r_flag" == "" ]; then print_usage "NO_MODE"; exit 1; fi
+if [ "$b_flag" == "true" ] && [ "$r_flag" == "true" ]; then print_usage "BOTH_MODES"; exit 1; fi
+
+# Check if volume and filename are not empty
+if [ "$volume" == "" ]; then print_usage "NO_VOLUME_SPECIFIED"; exit 1; fi
+if [ "$file" == "" ]; then print_usage "NO_FILE_SPECIFIED"; exit 1; fi
+
+# TODO check if file has no extension
+#
+
+# Check if volume specified exists, action depends on the mode
+# In backup mode, volume needs to exist
+# In restore mode, if volume exists, we need to CONFIRM if we're overwriting it, DATA MAY BE LOST!!!
+test_volume=$(docker volume ls | grep $volume | awk '{print $2}')
+
+# backup mode
+if [ "$b_flag" == "true" ]; then
+    if [ "${volume}" != "${test_volume}" ]; then print_usage "VOLUME_DOESNT_EXIST"; exit 1; fi
+
+    # Finally do some action BOYZZZZ
+    docker run --rm --volume $volume:/tmpdata --volume $(pwd):/backup ubuntu tar cvf /backup/$file.tar /tmpdata
+fi
+
+# restore mode
+if [ "$r_flag" == "true" ]; then
+    if [ "${volume}" == "${test_volume}" ]; then
+        printf "$WARNING_VOLUME_ALREADY_EXISTS\n"
+        read -p "Are you sure? " -n 1 -r
+        echo    # move to a new line
+        if [[ ! $REPLY =~ ^[Yy]$ ]]; then printf "Nothing was done.\n"; exit 1; fi
+    fi
+
+    # Finally do some action BOYZZZZ
+    docker run --rm --volume $volume:/tmpdata --volume $(pwd):/backup ubuntu tar xvf /backup/$file.tar -C /tmpdata --strip 1
+fi
